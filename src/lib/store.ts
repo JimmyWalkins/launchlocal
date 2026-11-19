@@ -31,6 +31,15 @@ export interface SeoPack {
   source: "ai" | "heuristic";
 }
 
+export const CRM_STATUSES = ["new", "contacted", "qualified", "proposal", "won", "lost"] as const;
+export type CrmStatus = (typeof CRM_STATUSES)[number];
+
+export interface TimelineEvent {
+  ts: string;
+  event: string;
+  detail: string;
+}
+
 export interface Lead {
   id: string;
   name: string;
@@ -42,6 +51,8 @@ export interface Lead {
   rating?: number;
   reviews?: number;
   score: number;
+  status: CrmStatus;
+  timeline: TimelineEvent[];
   source: "google" | "demo" | "manual";
   audit?: Audit;
   seo?: SeoPack;
@@ -50,22 +61,39 @@ export interface Lead {
   createdAt: string;
 }
 
-export interface Store {
-  leads: Record<string, Lead>;
+export interface Conversation {
+  sessionId: string;
+  leadId?: string;
+  contact?: { email?: string; phone?: string };
+  messages: { role: "user" | "assistant"; content: string; ts: string }[];
 }
 
-let store: Store = { leads: {} };
+export interface KbConfig {
+  offer?: string;
+  brand?: string;
+  faqs: { q: string; a: string }[];
+}
+
+export interface Store {
+  leads: Record<string, Lead>;
+  conversations: Record<string, Conversation>;
+  kb: KbConfig;
+}
+
+let store: Store = { leads: {}, conversations: {}, kb: { faqs: [] } };
 
 export function loadStore(): void {
   if (fs.existsSync(DATA_FILE)) {
     try {
       store = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")) as Store;
       if (!store.leads) store.leads = {};
+      if (!store.conversations) store.conversations = {};
+      if (!store.kb) store.kb = { faqs: [] };
     } catch {
-      store = { leads: {} };
+      store = { leads: {}, conversations: {}, kb: { faqs: [] } };
     }
   } else {
-    store = { leads: {} };
+    store = { leads: {}, conversations: {}, kb: { faqs: [] } };
   }
 }
 
@@ -97,11 +125,55 @@ export function addLead(lead: Lead): Lead {
 export function updateLead(id: string, patch: Partial<Lead>): Lead | undefined {
   const lead = store.leads[id];
   if (!lead) return undefined;
-  store.leads[id] = { ...lead, ...patch };
+  const next: Lead = { ...lead, status: lead.status, timeline: lead.timeline, ...patch };
+  next.timeline = (next.timeline ?? []).slice(-50);
+  store.leads[id] = next;
   return store.leads[id];
 }
 
+export function findLeadByPhone(phone: string): Lead | undefined {
+  const digits = phone.replace(/\D/g, "").slice(-10);
+  return Object.values(store.leads).find((l) => l.phone && l.phone.replace(/\D/g, "").slice(-10) === digits);
+}
+
+export function getConversation(sessionId: string): Conversation {
+  if (!store.conversations[sessionId]) {
+    store.conversations[sessionId] = { sessionId, messages: [] };
+  }
+  return store.conversations[sessionId];
+}
+
+export function saveConversation(sessionId: string, role: "user" | "assistant", content: string): void {
+  const conv = getConversation(sessionId);
+  conv.messages.push({ role, content, ts: new Date().toISOString() });
+  if (conv.messages.length > 200) conv.messages = conv.messages.slice(-200);
+}
+
+export function getKb(): KbConfig {
+  if (!store.kb.faqs.length) {
+    store.kb.faqs = [
+      { q: "What does Launch Local 661 do?", a: "We audit local businesses' online presence, then fix it: websites, local SEO, and outreach. Every engagement starts with a free automated audit and a plain-English plan." },
+      { q: "How much does a website cost?", a: "Launch Pad one-page site is $497 flat (includes copy, hosting setup, schema, first SEO pass). A full 5-page site is $1,497." },
+      { q: "What does SEO service include?", a: "SEO Care is $299/month: keyword plan, Google Business posts, on-page fixes, sitemap/schema, and a monthly progress report." },
+      { q: "How fast can it be live?", a: "Most one-page sites are live within 7 days of the kickoff call." },
+    ];
+  }
+  return store.kb;
+}
+
+export function setKb(patch: Partial<KbConfig>): KbConfig {
+  const kb = getKb();
+  if (patch.offer !== undefined) kb.offer = patch.offer;
+  if (patch.brand !== undefined) kb.brand = patch.brand;
+  if (Array.isArray(patch.faqs)) kb.faqs = patch.faqs;
+  return kb;
+}
+
+export function listConversations(): Conversation[] {
+  return Object.values(store.conversations);
+}
+
 export function resetStore(): void {
-  store = { leads: {} };
+  store = { leads: {}, conversations: {}, kb: { faqs: [] } };
   if (fs.existsSync(DATA_FILE)) fs.rmSync(DATA_FILE);
 }

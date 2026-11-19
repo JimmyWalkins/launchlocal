@@ -6,6 +6,7 @@ import express, { type Request, type Response } from "express";
 import { Mistral } from "@mistralai/mistralai";
 import { api } from "./routes/api.ts";
 import { config } from "./lib/config.ts";
+import { reindexAll } from "./lib/kb.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,7 +16,10 @@ const MODEL = "mistral-small-latest";
 let chatClient: Mistral | null = config.mistralKey ? new Mistral({ apiKey: config.mistralKey }) : null;
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "..", "public")));
+
+await reindexAll();
 
 app.use("/api", api);
 

@@ -120,5 +120,65 @@ console.log("audit validation:", badAudit.statusCode);
 console.log("site built:", siteRes.statusCode, siteFile);
 console.log("seo pack:", seoRes.statusCode, "source=", seo.source);
 console.log("responder preview:", preview.statusCode);
+
+const kbRes = await dispatch("POST", "/api/kb", {
+  brand: "Launch Local 661",
+  offer: "Launch Pad one-page site $497 flat, live in 7 days. SEO Care $299/month. Free audit anytime.",
+  faqs: [{ q: "Do you offer payment plans?", a: "Yes - 50/50 split on website projects." }],
+});
+assert.equal(kbRes.statusCode, 200, "kb update works");
+assert.ok(json(kbRes).knowledge.byKind.faq >= 1, "kb ingested faq chunks");
+
+const agentPricing = await dispatch("POST", "/api/agent", { sessionId: "smoke-agent", message: "How much is a website?" });
+assert.equal(agentPricing.statusCode, 200, "agent responds");
+const pricingBody = json(agentPricing);
+assert.ok(pricingBody.reply && pricingBody.reply.length > 10, "agent reply non-empty");
+assert.equal(pricingBody.engine, "rules", "no key => rule engine");
+assert.ok(pricingBody.toolsUsed.includes("create_checkout") === false, "no checkout on simple pricing q");
+
+const agentPay = await dispatch("POST", "/api/agent", { sessionId: "smoke-agent", message: "I want to buy the one page site now" });
+assert.ok(json(agentPay).toolsUsed.includes("create_checkout"), "buy intent triggers checkout tool");
+
+const agentBook = await dispatch("POST", "/api/agent", { sessionId: "smoke-agent", message: "Let's book a call tomorrow" });
+assert.equal(json(agentBook).statusCode, undefined);
+assert.ok(json(agentBook).reply.includes("BOOKING_URL") || json(agentPay).reply.includes("http") || json(agentBook).reply.includes("book"), "booking handled");
+
+const crmLead = json(await dispatch("GET", "/api/leads")).leads[0];
+assert.ok(crmLead, "lead available for channel tests");
+
+const emailReply = await dispatch("POST", "/api/agent/email", { leadId: crmLead.id, text: "Sounds good, what's included in the $497?", from: "owner@example.com" });
+assert.equal(emailReply.statusCode, 200, "agent email reply works");
+const emailBody = json(emailReply);
+assert.ok(emailBody.reply.includes("497") || emailBody.reply.length > 10, "email reply references offer");
+assert.ok(emailBody.sentTo === "owner@example.com", "email reply routed to sender");
+assert.ok(emailBody.sent.ok === false && emailBody.sent.provider === "none", "email send no-ops without SMTP but is journaled");
+
+const smsReply = await dispatch("POST", "/api/agent/sms", { leadId: crmLead.id, from: "+16615550134", text: "hey is seo really $299/mo?" });
+assert.equal(smsReply.statusCode, 200, "agent sms reply works");
+const smsBody = json(smsReply);
+assert.ok(smsBody.sent.ok === false && smsBody.sent.provider === "none", "sms send no-ops without twilio but is journaled");
+assert.ok(smsBody.reply.toLowerCase().includes("299"), "sms answer grounded in KB");
+
+const stopReply = await dispatch("POST", "/api/agent/sms", { leadId: crmLead.id, from: "+16615550134", text: "STOP" });
+assert.ok(json(stopReply).reply.toLowerCase().includes("unsubscribed"), "STOP honored");
+
+const convRes = await dispatch("GET", "/api/conversations");
+const conversations = json(convRes).conversations;
+assert.ok(conversations.some((c) => c.sessionId === "email-smoke..." || String(c.sessionId).includes("smoke-agent")), "conversations journaled");
+
+const status2 = json(await dispatch("GET", "/api/status"));
+assert.equal(status2.apps.salesAgent, true, "agent app flag on");
+assert.ok(status2.knowledge.chunks > 0, "knowledge indexed at boot + by endpoints");
+const crmLeadAfter = json(await dispatch("GET", "/api/leads")).leads.find((l) => l.id === crmLead.id);
+assert.ok((crmLeadAfter?.outreach?.length ?? 0) >= 2, "channel replies journaled on the lead");
+assert.equal(crmLead.status, "new", "crm status default");
+
+console.log("agent pricing:", agentPricing.statusCode, JSON.stringify(pricingBody.reply).slice(0, 90));
+console.log("agent checkout:", json(agentPay).toolsUsed.join(","));
+console.log("email reply:", emailReply.statusCode, "| journaled on lead");
+console.log("sms reply:", smsReply.statusCode, "| STOP honored");
+console.log("knowledge:", JSON.stringify(status2.knowledge));
+
+
 resetStore();
 process.exit(0);

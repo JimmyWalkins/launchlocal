@@ -1,14 +1,18 @@
-import nodemailer from "nodemailer";
-import { config, hasSmtp, hasTwilio } from "./config.ts";
+import { sendEmail, sendSms, type SendOutcome } from "./notify.ts";
 import type { Audit, Lead } from "./store.ts";
 
 export interface Draft {
-  email: { to?: string; subject: string; body: string };
+  email: { subject: string; body: string };
   sms: { to?: string; body: string };
 }
 
 export function draftMessages(lead: Lead, audit?: Audit | null): Draft {
-  const issues = audit?.reachable === true ? audit.recommendations.slice(0, 2).join("; ") : audit ? "your site was unreachable when we checked" : "your online presence";
+  const issues =
+    audit?.reachable === true
+      ? audit.recommendations.slice(0, 2).join("; ")
+      : audit
+        ? "your site was unreachable when we checked"
+        : "your online presence";
   const siteLink = lead.siteUrl ? ` We even mocked up a free preview: ${lead.siteUrl}` : "";
   const email = {
     subject: `Quick note about ${lead.name}'s online presence`,
@@ -28,58 +32,17 @@ export function draftMessages(lead: Lead, audit?: Audit | null): Draft {
 }
 
 export interface SendResult {
-  email?: { ok: boolean; provider: string; detail: string };
-  sms?: { ok: boolean; provider: string; detail: string };
+  email?: SendOutcome;
+  sms?: SendOutcome;
 }
 
 export async function sendOutreach(lead: Lead, draft: Draft, channels: { email?: string; sms?: string }): Promise<SendResult> {
   const result: SendResult = {};
-  const emailTo = channels.email;
-  if (emailTo) {
-    if (!hasSmtp()) {
-      result.email = { ok: false, provider: "none", detail: "SMTP not configured (set SMTP_HOST and SMTP_FROM in .env)" };
-    } else {
-      try {
-        const transport = nodemailer.createTransport({
-          host: config.smtp.host,
-          port: config.smtp.port,
-          secure: config.smtp.port === 465,
-          auth: config.smtp.user && config.smtp.pass ? { user: config.smtp.user, pass: config.smtp.pass } : undefined,
-        });
-        await transport.sendMail({
-          from: config.smtp.from,
-          to: emailTo,
-          subject: draft.email.subject,
-          text: draft.email.body,
-        });
-        result.email = { ok: true, provider: `smtp:${config.smtp.host}`, detail: `sent to ${emailTo}` };
-      } catch (err) {
-        result.email = { ok: false, provider: `smtp:${config.smtp.host}`, detail: err instanceof Error ? err.message : "send failed" };
-      }
-    }
+  if (channels.email) {
+    result.email = await sendEmail(channels.email, draft.email.subject, draft.email.body);
   }
-
-  const smsTo = channels.sms;
-  if (smsTo) {
-    if (!hasTwilio()) {
-      result.sms = { ok: false, provider: "none", detail: "Twilio not configured (set TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_FROM in .env)" };
-    } else {
-      try {
-        const auth = Buffer.from(`${config.twilio.sid}:${config.twilio.token}`).toString("base64");
-        const body = new URLSearchParams({ To: smsTo, From: config.twilio.from!, Body: draft.sms.body });
-        const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${config.twilio.sid}/Messages.json`, {
-          method: "POST",
-          headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" },
-          body,
-          signal: AbortSignal.timeout(15000),
-        });
-        result.sms = res.ok
-          ? { ok: true, provider: "twilio", detail: `sent to ${smsTo}` }
-          : { ok: false, provider: "twilio", detail: `Twilio API error ${res.status}` };
-      } catch (err) {
-        result.sms = { ok: false, provider: "twilio", detail: err instanceof Error ? err.message : "send failed" };
-      }
-    }
+  if (channels.sms) {
+    result.sms = await sendSms(channels.sms, draft.sms.body);
   }
   return result;
 }
