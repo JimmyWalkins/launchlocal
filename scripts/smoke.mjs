@@ -116,6 +116,25 @@ assert.equal(statusRes.statusCode, 200, "status endpoint works");
 
 assert.ok(fs.existsSync("public" + siteFile), "site file written to disk");
 
+const tplList = await dispatch("GET", "/api/templates");
+assert.equal(json(tplList).templates.length, 4, "template catalog served (4 templates)");
+assert.ok(json(siteRes).template, "site response reports template id");
+const defaultTemplate = json(siteRes).template;
+const defaultHtml = siteRes2.body;
+if (demoLead.category === "plumber") {
+  assert.equal(defaultTemplate, "trustbar", "plumber auto-matches trustbar template");
+}
+const tplBad = await dispatch("POST", "/api/site", { leadId: demoLead.id, template: "nope" });
+assert.equal(tplBad.statusCode, 400, "unknown template rejected");
+const tplOverride = await dispatch("POST", "/api/site", { leadId: demoLead.id, template: defaultTemplate === "trustbar" ? "minimal" : "trustbar" });
+assert.equal(tplOverride.statusCode, 200, "template override accepted");
+assert.notEqual(json(tplOverride).template, defaultTemplate, "override picks a different template");
+const overridden = await dispatch("GET", siteFile);
+assert.equal(overridden.statusCode, 200, "overridden site served");
+assert.notEqual(overridden.body, defaultHtml, "override changes site markup");
+assert.ok(overridden.body.includes("application/ld+json") && overridden.body.includes("viewport"), "every template keeps schema + mobile viewport");
+console.log("templates:", json(tplList).templates.map((t) => t.id).join("/"), `| default=${defaultTemplate} override=${json(tplOverride).template}`);
+
 console.log("SMOKE_OK");
 console.log("dashboard:", page.statusCode);
 console.log("chat page:", chatPage.statusCode, "(kept from step 1)");

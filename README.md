@@ -6,7 +6,7 @@ A full local-marketing toolkit for small businesses (starting in Bakersfield, CA
 
 1. **Lead generator** — finds local businesses that need websites / ads / SEO. Uses the Google Places API when `GOOGLE_PLACES_API_KEY` is set; otherwise serves built-in demo leads so you can run the whole flow without keys. Every lead gets a 0–100 *marketing-need score* (no website, low rating, few reviews ⇒ hotter opportunity).
 2. **Automated auditor + scorer** — crawls a business's website and checks HTTPS, load speed, title, meta description, H1, mobile viewport, robots.txt, sitemap.xml, favicon, JSON-LD schema, image alt-text and content depth. Produces an audit score, plain-English recommendations, and re-scores the lead.
-3. **Website builder** — generates a fast one-page site per business (industry-themed, mobile-ready, LocalBusiness JSON-LD, trust badges, call CTAs). Copy is written by Mistral when `MISTRAL_API_KEY` is set, with strong built-in templates as fallback. Saved to `public/sites/` and served at `/sites/<slug>.html`.
+3. **Website builder** — generates a fast one-page site per business from a **template library**: *Classic hero*, *Spotlight* (image-forward), *Trust bar* (reviews/stats-forward), and *Minimal* (clean pro). Templates auto-match the business category (plumber → Trust bar, restaurant → Spotlight, dentist → Minimal, …) or you can pick one explicitly with `POST /api/site {leadId, template}` — every template is mobile-ready, ships LocalBusiness JSON-LD, trust badges, and call CTAs. Copy is written by Mistral when `MISTRAL_API_KEY` is set, with strong built-in templates as fallback. Saved to `public/sites/` and served at `/sites/<slug>.html`.
 4. **SEO optimizer** — produces a ready-to-paste pack: meta title + description, 8 local-intent keywords, 4 weekly Google Business Profile post ideas, and prioritized fixes (AI when available, heuristic fallback otherwise).
 5. **Auto email/SMS responder** — drafts personalized first-touch outreach using the audit findings. Sends via SMTP (`nodemailer`) or Twilio when configured; otherwise returns the drafts as a preview.
 6. **ML sales agent (Jamie)** — an agent loop with tool calling on Mistral `mistral-small-latest`:
@@ -40,6 +40,7 @@ All endpoints live under `/api`:
 | GET | `/api/status` | — | feature + integration flags |
 | POST | `/api/leads/search` | `{category, city, limit?}` | find & score leads (Google Places or demo) |
 | GET | `/api/leads` | — | all stored leads, sorted by need |
+| GET | `/api/templates` | — | website template catalog (id, name, business-type fit) |
 | POST | `/api/audit` | `{leadId?, url?}` | run website audit, re-score, index into RAG |
 | POST | `/api/kb` | `{offer?, brand?, faqs?}` | update knowledge base (RAG reindexed) |
 | POST | `/api/agent` | `{sessionId?, leadId?, message, contact?}` | sales agent turn (web widget) |
@@ -51,7 +52,7 @@ All endpoints live under `/api`:
 | POST | `/webhooks/stripe` | Stripe event (raw body + `Stripe-Signature`) | signature-verified; `checkout.session.completed` marks lead won |
 | GET | `/api/conversations` | — | journaled conversations |
 | POST | `/api/seo` | `{leadId}` | generate SEO pack |
-| POST | `/api/site` | `{leadId}` | build & serve one-page site |
+| POST | `/api/site` | `{leadId, template?}` | build & serve one-page site (template optional; auto-matches category) |
 | POST | `/api/responder` | `{leadId, email?, sms?}` | draft (+send when recipients given) outreach |
 | POST | `/api/chat` | `{messages:[{role,content}]}` | Mistral chat (key required) |
 
@@ -71,7 +72,8 @@ src/routes/api.ts       all /api endpoints above
 src/lib/leadgen.ts      Google Places search + demo leads + scoring
 src/lib/audit.ts        13-point automated website audit
 src/lib/score.ts        marketing-need scoring model
-src/lib/builder.ts      website generator (industry themes, Mistral copy)
+src/lib/builder.ts      website generator (Mistral copy or templates)
+src/lib/templates.ts    site template library (classic / spotlight / trustbar / minimal)
 src/lib/seo.ts          SEO pack generator (AI or heuristic)
 src/lib/responder.ts    email/sms drafting + sending
 src/lib/ai.ts           Mistral client wrapper

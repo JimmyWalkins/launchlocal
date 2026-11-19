@@ -119,6 +119,25 @@ $("btn-audit").addEventListener("click", async () => {
   }
 });
 
+async function loadTemplates() {
+  try {
+    const res = await fetch("/api/templates");
+    const data = await res.json();
+    const sel = $("w-template");
+    for (const t of data.templates ?? []) {
+      const opt = document.createElement("option");
+      opt.value = t.id;
+      opt.textContent = t.name;
+      sel.appendChild(opt);
+    }
+  } catch {}
+}
+
+$("w-template").addEventListener("change", () => {
+  const sel = $("w-template");
+  if (sel.value) sel.title = `Forces the ${sel.options[sel.selectedIndex].text} layout`;
+});
+
 $("btn-site").addEventListener("click", async () => {
   const btn = $("btn-site");
   const out = $("site-out");
@@ -127,12 +146,13 @@ $("btn-site").addEventListener("click", async () => {
     out.innerHTML = note("Pick a lead first (search leads in step 1).", "err");
     return;
   }
+  const template = $("w-template").value || undefined;
   btn.disabled = true;
   out.innerHTML = note("Generating website…", "warn");
   try {
-    const data = await post("/site", { leadId });
+    const data = await post("/site", { leadId, template });
     out.innerHTML = note(
-      `Website built! Copy by <strong>${data.copySource === "ai" ? "Mistral AI" : "built-in templates"}</strong> → <a href="${esc(data.siteUrl)}" target="_blank" rel="noopener">${esc(data.siteUrl)}</a>`,
+      `Website built with <strong>${esc(data.template ?? "auto")}</strong> template, copy by <strong>${data.copySource === "ai" ? "Mistral AI" : "built-in templates"}</strong> → <a href="${esc(data.siteUrl)}" target="_blank" rel="noopener">${esc(data.siteUrl)}</a>`,
       "ok-note",
     );
   } catch (err) {
@@ -203,6 +223,7 @@ $("btn-outreach").addEventListener("click", async () => {
 });
 
 refreshLeads();
+loadTemplates();
 fetch("/api/status")
   .then((r) => r.json())
   .then((s) => {

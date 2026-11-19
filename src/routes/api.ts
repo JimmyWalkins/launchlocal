@@ -8,6 +8,7 @@ import { buildSite } from "../lib/builder.ts";
 import { draftMessages, sendOutreach } from "../lib/responder.ts";
 import { sendEmail, sendSms } from "../lib/notify.ts";
 import { runAgent } from "../lib/agent.ts";
+import { listTemplates } from "../lib/templates.ts";
 import { ingestAudit, knowledgeStats, reindexAll } from "../lib/kb.ts";
 import { bookingLink, calendarProvider } from "../lib/calendar.ts";
 import { paymentsConfigured } from "../lib/payments.ts";
@@ -126,17 +127,26 @@ api.post("/seo", async (req: Request, res: Response) => {
   res.json({ leadId: lead.id, seo, ai: aiFlag });
 });
 
+api.get("/templates", (_req, res) => {
+  res.json({ templates: listTemplates() });
+});
+
 api.post("/site", async (req: Request, res: Response) => {
-  const leadId = asString((req.body as Record<string, unknown>).leadId);
+  const body = req.body as Record<string, unknown>;
+  const leadId = asString(body.leadId);
   if (!leadId) return bad(res, "Provide 'leadId'.");
   const lead = getLead(leadId);
   if (!lead) return bad(res, `Unknown leadId: ${leadId}`);
+  const templateHint = asString(body.template) || undefined;
+  if (templateHint && !listTemplates().some((t) => t.id === templateHint.toLowerCase())) {
+    return bad(res, `Unknown template '${templateHint}'. Available: ${listTemplates().map((t) => t.id).join(", ")} (omit to auto-match business type).`);
+  }
 
-  const site = await buildSite(lead, lead.seo, lead.audit ?? null);
+  const site = await buildSite(lead, lead.seo, lead.audit ?? null, templateHint);
   const siteUrl = `/sites/${site.fileName}`;
   updateLead(lead.id, { siteUrl });
   saveStore();
-  res.json({ leadId: lead.id, siteUrl, copySource: site.copySource });
+  res.json({ leadId: lead.id, siteUrl, copySource: site.copySource, template: site.template });
 });
 
 api.post("/responder", async (req: Request, res: Response) => {
