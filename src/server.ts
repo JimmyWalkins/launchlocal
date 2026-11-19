@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 import express, { type Request, type Response } from "express";
 import { Mistral } from "@mistralai/mistralai";
 import { api } from "./routes/api.ts";
+import { webhooks } from "./routes/webhooks.ts";
 import { config } from "./lib/config.ts";
 import { reindexAll } from "./lib/kb.ts";
+import { tickSequences } from "./lib/sequences.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,13 +17,20 @@ export const app = express();
 const MODEL = "mistral-small-latest";
 let chatClient: Mistral | null = config.mistralKey ? new Mistral({ apiKey: config.mistralKey }) : null;
 
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req: Request, _res: Response, buf: Buffer) => {
+      (req as Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 await reindexAll();
 
 app.use("/api", api);
+app.use("/webhooks", webhooks);
 
 if (fs.existsSync(path.join(__dirname, "..", "public", "chat.html"))) {
   app.get("/chat", (_req: Request, res: Response) => {
@@ -79,11 +88,16 @@ app.use((req: Request, res: Response) => {
 });
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  void tickSequences();
+  const sequenceTimer = setInterval(() => {
+    void tickSequences();
+  }, 60_000);
+  sequenceTimer.unref();
   const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, () => {
     console.log(`launchlocal listening on http://localhost:${PORT}`);
     console.log(`  dashboard:    http://localhost:${PORT}/`);
     console.log(`  chat app:     http://localhost:${PORT}/chat`);
-    console.log(`  integrations: mistral=${Boolean(config.mistralKey)} places=${Boolean(config.placesKey)} twilio=${Boolean(config.twilio.sid)} smtp=${Boolean(config.smtp.host)}`);
+    console.log(`  integrations: mistral=${Boolean(config.mistralKey)} places=${Boolean(config.placesKey)} twilio=${Boolean(config.twilio.sid)} smtp=${Boolean(config.smtp.host)} stripeWebhook=${Boolean(process.env.STRIPE_WEBHOOK_SECRET)}`);
   });
 }

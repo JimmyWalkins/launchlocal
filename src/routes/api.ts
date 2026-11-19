@@ -20,12 +20,14 @@ import {
   getLead,
   getKb,
   listConversations,
+  listEnrollments,
   listLeads,
   saveStore,
   setKb,
   updateLead,
   type Lead,
 } from "../lib/store.ts";
+import { SEQUENCES, enrollLead, tickSequences } from "../lib/sequences.ts";
 import { hasPlaces, hasSmtp, hasTwilio } from "../lib/config.ts";
 
 export const api = Router();
@@ -43,7 +45,7 @@ const asNumber = (v: unknown): number | undefined => {
 
 api.get("/status", (_req, res) => {
   res.json({
-    apps: { chat: true, leadgen: true, audit: true, builder: true, seo: true, autoresponder: true, salesAgent: true },
+    apps: { chat: true, leadgen: true, audit: true, builder: true, seo: true, autoresponder: true, salesAgent: true, sequences: true, stripeWebhook: true },
     integrations: {
       mistral: aiFlag,
       googlePlaces: hasPlaces(),
@@ -293,6 +295,30 @@ api.post("/agent/sms", async (req: Request, res: Response) => {
     return;
   }
   res.json({ ok: true, sessionId, engine: result.engine, toolsUsed: result.toolsUsed, reply: result.reply, sent, sentTo: to ?? null });
+});
+
+api.post("/sequences/enroll", async (req: Request, res: Response) => {
+  const leadId = asString(req.body?.leadId);
+  if (!leadId) return bad(res, "Provide 'leadId'.");
+  const seqName = asString(req.body?.seqName) || "standard";
+  const result = enrollLead(leadId, seqName);
+  if (!result.ok) return bad(res, result.error);
+  res.json({ ok: true, enrollment: result.enrollment, available: Object.keys(SEQUENCES) });
+});
+
+api.get("/sequences", (_req, res) => {
+  res.json({
+    available: Object.keys(SEQUENCES).map((name) => ({
+      name,
+      steps: SEQUENCES[name].map((s) => ({ day: s.day, channel: s.channel, label: s.label })),
+    })),
+    enrollments: listEnrollments(),
+  });
+});
+
+api.post("/sequences/tick", async (_req, res) => {
+  const result = await tickSequences();
+  res.json({ ok: true, ...result });
 });
 
 api.get("/conversations", (_req, res) => {

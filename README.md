@@ -14,6 +14,8 @@ A full local-marketing toolkit for small businesses (starting in Bakersfield, CA
    - **Tools the agent can call**: `search_knowledge`, `get_lead_info`, `book_meeting` (Cal.com/Calendly link), `send_email` (SMTP), `send_sms` (Twilio), `set_crm_status` (new/contacted/qualified/proposal/won/lost), `create_checkout` (Stripe payment links).
    - **Channels**: the website chat widget lives at `/chat` (embed it anywhere: `<iframe src="https://YOURHOST/chat?leadId=...">`); inbound email replies go to `POST /api/agent/email`; inbound SMS (Twilio webhook compatible, answers in TwiML) go to `POST /api/agent/sms`. Every turn is journaled into RAG and the lead's CRM timeline.
    - Works with **zero keys** in rule-based fallback mode (booking/pricing/checkout intents still work); add `MISTRAL_API_KEY` to enable the real LLM agent loop.
+7. **Scheduled follow-up sequences** — enroll a lead in a drip sequence (default `standard`: day 1 email recap → day 3 SMS nudge → day 7 final email). A ticker runs at boot and every 60s, sends due steps via the same SMTP/Twilio senders, journals every step to the lead's outreach log + CRM timeline, and auto-stops sequences for leads marked won/lost. Enroll with `POST /api/sequences/enroll {leadId, seqName?}`; inspect with `GET /api/sequences`; force a run with `POST /api/sequences/tick`. Sends degrade gracefully to journaled no-ops without keys.
+8. **Stripe payment webhooks** — `POST /webhooks/stripe` verifies the `Stripe-Signature` HMAC (timing-safe, 5-minute tolerance) against `STRIPE_WEBHOOK_SECRET` over the raw request body, then marks the matching lead (via `client_reference_id`) **won** with a `payment_received` timeline event. Point a Stripe CLI forward or your Stripe dashboard webhook at `https://YOURHOST/webhooks/stripe` in production.
 
 ## Run locally
 
@@ -42,7 +44,11 @@ All endpoints live under `/api`:
 | POST | `/api/kb` | `{offer?, brand?, faqs?}` | update knowledge base (RAG reindexed) |
 | POST | `/api/agent` | `{sessionId?, leadId?, message, contact?}` | sales agent turn (web widget) |
 | POST | `/api/agent/email` | `{leadId?, from?, text, to?}` | agent answers inbound email, sends via SMTP |
-| POST | `/agent/sms` — | `{leadId?, From?, Body/text}` (or Twilio form post) | agent answers inbound SMS, replies in TwiML |
+| POST | `/api/agent/sms` | `{leadId?, From?, Body/text}` (or Twilio form post) | agent answers inbound SMS, replies in TwiML |
+| POST | `/api/sequences/enroll` | `{leadId, seqName?}` | enroll lead in a follow-up drip sequence |
+| GET | `/api/sequences` | — | available sequences + all enrollments/step state |
+| POST | `/api/sequences/tick` | — | run due sequence steps now (also auto-runs every 60s) |
+| POST | `/webhooks/stripe` | Stripe event (raw body + `Stripe-Signature`) | signature-verified; `checkout.session.completed` marks lead won |
 | GET | `/api/conversations` | — | journaled conversations |
 | POST | `/api/seo` | `{leadId}` | generate SEO pack |
 | POST | `/api/site` | `{leadId}` | build & serve one-page site |
@@ -75,8 +81,12 @@ src/lib/embed.ts        mistral-embed embeddings + keyword-overlap fallback
 src/lib/calendar.ts     Cal.com / Calendly booking links
 src/lib/payments.ts     Stripe checkout links (REST)
 src/lib/notify.ts       shared email (SMTP) and SMS (Twilio) senders
-src/lib/store.ts        JSON-file persistence (data/store.json)
+src/lib/sequences.ts    scheduled follow-up drips (day 1/3/7) + ticker
+src/routes/webhooks.ts  Stripe inbound webhook (signature verify -> lead 'won')
+src/lib/store.ts        SQLite persistence via node:sqlite (data/launchlocal.db; migrates legacy data/store.json)
 public/                 dashboard (/) and chat (/chat)
 ```
 
-Generated sites land in `public/sites/`, lead data in `data/` — both gitignored.
+Generated sites land in `public/sites/`; leads, conversations, KB, and sequence enrollments persist in `data/launchlocal.db` (SQLite, zero extra dependencies — a legacy `data/store.json` is migrated automatically on first boot). Both are gitignored.
+
+Note: the Stripe webhook can only be verified end-to-end once the server is reachable from Stripe (e.g. `stripe listen --forward-to localhost:3000/webhooks/stripe` for dev, and put the app behind a public URL like `https://YOURHOST/webhooks/stripe` in production). Without `STRIPE_WEBHOOK_SECRET` set, the endpoint returns 503 and never processes unsigned events.

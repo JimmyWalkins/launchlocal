@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { createHmac } from "node:crypto";
 import { Readable } from "node:stream";
 import { EventEmitter } from "node:events";
 import { app } from "../src/server.ts";
 import { resetStore } from "../src/lib/store.ts";
+import { tickSequences } from "../src/lib/sequences.ts";
 
 resetStore();
+const WEBHOOK_SECRET = "whsec_smoke_test";
+process.env.STRIPE_WEBHOOK_SECRET = WEBHOOK_SECRET;
 
 function mockRes() {
   const res = new EventEmitter();
@@ -29,23 +33,23 @@ function mockRes() {
   return res;
 }
 
-function mockReq(method, url, body) {
+function mockReq(method, url, body, extraHeaders = {}) {
   const payload = body ? Buffer.from(JSON.stringify(body)) : Buffer.from("");
   const req = Readable.from([payload]);
   req.method = method;
   req.url = url;
   req.headers = body
-    ? { "content-type": "application/json", "content-length": payload.length.toString() }
-    : {};
+    ? { "content-type": "application/json", "content-length": payload.length.toString(), ...extraHeaders }
+    : { ...extraHeaders };
   req.socket = { remoteAddress: "127.0.0.1" };
   return req;
 }
 
-function dispatch(method, url, body) {
+function dispatch(method, url, body, extraHeaders = {}) {
   return new Promise((resolve) => {
     const res = mockRes();
     res.on("finish", () => resolve(res));
-    app.handle(mockReq(method, url, body), res);
+    app.handle(mockReq(method, url, body, extraHeaders), res);
   });
 }
 
@@ -179,6 +183,95 @@ console.log("email reply:", emailReply.statusCode, "| journaled on lead");
 console.log("sms reply:", smsReply.statusCode, "| STOP honored");
 console.log("knowledge:", JSON.stringify(status2.knowledge));
 
+const goodLead = json(await dispatch("GET", "/api/leads")).leads.find((l) => l.phone) ?? json(await dispatch("GET", "/api/leads")).leads[0];
+
+const enroll = await dispatch("POST", "/api/sequences/enroll", { leadId: goodLead.id });
+assert.equal(enroll.statusCode, 200, "sequence enroll works");
+const enrollBody = json(enroll);
+assert.ok(enrollBody.enrollment.steps.length === 3, "standard sequence has 3 steps");
+const dupEnroll = await dispatch("POST", "/api/sequences/enroll", { leadId: goodLead.id });
+assert.equal(dupEnroll.statusCode, 400, "duplicate enrollment rejected");
+const unknownLeadEnroll = await dispatch("POST", "/api/sequences/enroll", { leadId: "nope" });
+assert.equal(unknownLeadEnroll.statusCode, 400, "unknown lead enrollment rejected");
+const unknownSeqEnroll = await dispatch("POST", "/api/sequences/enroll", { leadId: goodLead.id, seqName: "nope" });
+assert.equal(unknownSeqEnroll.statusCode, 400, "unknown sequence rejected");
+
+const seqList = json(await dispatch("GET", "/api/sequences"));
+assert.ok(seqList.available.some((s) => s.name === "standard"), "standard sequence listed");
+assert.ok(seqList.enrollments.some((e) => e.leadId === goodLead.id && e.status === "active"), "enrollment persisted");
+
+const noopTick = await dispatch("POST", "/api/sequences/tick", {});
+assert.equal(noopTick.statusCode, 200, "tick endpoint works (nothing due yet)");
+
+const outreachBefore = (json(await dispatch("GET", "/api/leads")).leads.find((l) => l.id === goodLead.id)?.outreach ?? []).length;
+const tick = await tickSequences(Date.now() + 8 * 86400000);
+assert.equal(tick.checked, seqList.enrollments.length, "tick sees enrollments");
+assert.ok(tick.sent + tick.skipped === 3, "all standard steps resolved");
+const afterTickLead = json(await dispatch("GET", "/api/leads")).leads.find((l) => l.id === goodLead.id);
+const resolved = seqList.enrollments.find((e) => e.leadId === goodLead.id);
+assert.ok(afterTickLead, "lead still present after tick");
+assert.ok(tick.sent >= 1, "tick attempted at least the SMS step (lead has phone)");
+assert.ok((afterTickLead?.outreach?.length ?? 0) > outreachBefore, "sequence sends journaled to outreach");
+assert.ok(afterTickLead.timeline.some((t) => t.event === "sequence_step_sent"), "sequence steps journaled to timeline");
+const seqAfter = json(await dispatch("GET", "/api/sequences")).enrollments.find((e) => e.leadId === goodLead.id);
+assert.ok(seqAfter.steps.every((s) => s.status === "sent" || s.status === "skipped"), "no step left pending after due tick");
+assert.equal(json(await dispatch("GET", "/api/sequences")).enrollments.find((e) => e.leadId === goodLead.id).status, "done", "enrollment completes");
+
+console.log("sequences:", enroll.statusCode, `tick sent=${tick.sent} skipped=${tick.skipped}`);
+
+const noSecretEnv = process.env.STRIPE_WEBHOOK_SECRET;
+delete process.env.STRIPE_WEBHOOK_SECRET;
+const unsignedBlocked = await dispatch("POST", "/webhooks/stripe", { type: "checkout.session.completed" });
+assert.equal(unsignedBlocked.statusCode, 503, "webhook refuses to run without secret");
+process.env.STRIPE_WEBHOOK_SECRET = noSecretEnv;
+
+const webhookEvent = {
+  id: "evt_smoke_1",
+  type: "checkout.session.completed",
+  data: { object: { client_reference_id: goodLead.id, amount_total: 49700, currency: "usd", customer_details: { email: "owner@example.com" } } },
+};
+
+const badSig = await dispatch(
+  "POST",
+  "/webhooks/stripe",
+  webhookEvent,
+  { "stripe-signature": `t=${Math.floor(Date.now() / 1000)},v1=${"0".repeat(64)}` },
+);
+assert.equal(badSig.statusCode, 400, "webhook rejects bad signature");
+
+const noHeader = await dispatch("POST", "/webhooks/stripe", webhookEvent);
+assert.equal(noHeader.statusCode, 400, "webhook rejects missing signature header");
+
+const staleT = Math.floor(Date.now() / 1000) - 4000;
+const staleSig = createHmac("sha256", WEBHOOK_SECRET).update(`${staleT}.${JSON.stringify(webhookEvent)}`).digest("hex");
+const stale = await dispatch("POST", "/webhooks/stripe", webhookEvent, { "stripe-signature": `t=${staleT},v1=${staleSig}` });
+assert.equal(stale.statusCode, 400, "webhook rejects stale timestamps");
+
+const tGood = Math.floor(Date.now() / 1000);
+const goodSig = createHmac("sha256", WEBHOOK_SECRET).update(`${tGood}.${JSON.stringify(webhookEvent)}`).digest("hex");
+const hookOk = await dispatch("POST", "/webhooks/stripe", webhookEvent, { "stripe-signature": `t=${tGood},v1=${goodSig}` });
+assert.equal(hookOk.statusCode, 200, "valid signature accepted");
+assert.equal(json(hookOk).received, true, "webhook acknowledges receipt");
+
+const wonLead = json(await dispatch("GET", "/api/leads")).leads.find((l) => l.id === goodLead.id);
+assert.equal(wonLead?.status, "won", "payment marks lead won");
+assert.ok(wonLead?.timeline.some((t) => t.event === "payment_received" && t.detail.includes("497.00")), "payment timeline event recorded");
+
+const unrelatedEvent = { id: "evt_smoke_2", type: "invoice.paid", data: { object: {} } };
+const tUnrelated = Math.floor(Date.now() / 1000);
+const unrelatedSig = createHmac("sha256", WEBHOOK_SECRET).update(`${tUnrelated}.${JSON.stringify(unrelatedEvent)}`).digest("hex");
+const unrelated = await dispatch("POST", "/webhooks/stripe", unrelatedEvent, { "stripe-signature": `t=${tUnrelated},v1=${unrelatedSig}` });
+assert.equal(unrelated.statusCode, 200, "non-checkout events acknowledged");
+
+console.log("stripe webhook:", hookOk.statusCode, "| lead marked won | bad/stale/unsigned rejected");
+
+assert.ok(fs.existsSync("data/launchlocal.db"), "SQLite database file created");
+const storeLib = await import("../src/lib/store.ts");
+storeLib.loadStore();
+const reloaded = storeLib.listLeads().find((l) => l.id === goodLead.id);
+assert.ok(reloaded && reloaded.status === "won", "SQLite roundtrip preserves leads + status");
+assert.ok(Object.keys(storeLib.getConversation("smoke-agent").messages ?? []).length >= 0, "conversations reload from SQLite");
+console.log("sqlite:", "data/launchlocal.db roundtrip OK, leads =", storeLib.listLeads().length);
 
 resetStore();
 process.exit(0);

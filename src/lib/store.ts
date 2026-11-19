@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "..", "data");
-const DATA_FILE = path.join(DATA_DIR, "store.json");
+const DB_FILE = path.join(DATA_DIR, "launchlocal.db");
+const LEGACY_FILE = path.join(DATA_DIR, "store.json");
 
 export interface AuditCheck {
   id: string;
@@ -74,32 +76,116 @@ export interface KbConfig {
   faqs: { q: string; a: string }[];
 }
 
+export interface SequenceStepState {
+  day: number;
+  channel: "email" | "sms";
+  label: string;
+  status: "pending" | "sent" | "skipped";
+  dueAt: string;
+  sentAt?: string;
+  detail?: string;
+}
+
+export interface Enrollment {
+  id: string;
+  leadId: string;
+  seqName: string;
+  status: "active" | "done" | "stopped";
+  enrolledAt: string;
+  steps: SequenceStepState[];
+}
+
 export interface Store {
   leads: Record<string, Lead>;
   conversations: Record<string, Conversation>;
+  enrollments: Enrollment[];
   kb: KbConfig;
 }
 
-let store: Store = { leads: {}, conversations: {}, kb: { faqs: [] } };
+let store: Store = emptyStore();
+let db: DatabaseSync | null = null;
+
+function emptyStore(): Store {
+  return { leads: {}, conversations: {}, enrollments: [], kb: { faqs: [] } };
+}
+
+function normalize(raw: Partial<Store> | null): Store {
+  const out = emptyStore();
+  if (!raw) return out;
+  if (raw.leads && typeof raw.leads === "object") out.leads = raw.leads;
+  if (raw.conversations && typeof raw.conversations === "object") out.conversations = raw.conversations;
+  if (Array.isArray(raw.enrollments)) out.enrollments = raw.enrollments;
+  if (raw.kb && typeof raw.kb === "object") out.kb = { ...raw.kb, faqs: raw.kb.faqs ?? [] };
+  return out;
+}
+
+function openDb(): DatabaseSync {
+  if (db) return db;
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  db = new DatabaseSync(DB_FILE);
+  db.exec("CREATE TABLE IF NOT EXISTS leads (id TEXT PRIMARY KEY, data TEXT NOT NULL)");
+  db.exec("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, data TEXT NOT NULL)");
+  return db;
+}
 
 export function loadStore(): void {
-  if (fs.existsSync(DATA_FILE)) {
+  const database = openDb();
+  const leadRows = database.prepare("SELECT data FROM leads").all() as { data?: string }[];
+  const kvRows = database.prepare("SELECT key, data FROM kv").all() as { key?: string; data?: string }[];
+  if (!leadRows.length && !kvRows.length && fs.existsSync(LEGACY_FILE)) {
     try {
-      store = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")) as Store;
-      if (!store.leads) store.leads = {};
-      if (!store.conversations) store.conversations = {};
-      if (!store.kb) store.kb = { faqs: [] };
+      store = normalize(JSON.parse(fs.readFileSync(LEGACY_FILE, "utf8")) as Partial<Store>);
     } catch {
-      store = { leads: {}, conversations: {}, kb: { faqs: [] } };
+      store = emptyStore();
     }
-  } else {
-    store = { leads: {}, conversations: {}, kb: { faqs: [] } };
+    saveStore();
+    return;
+  }
+  store = emptyStore();
+  for (const row of leadRows) {
+    try {
+      const lead = JSON.parse(row.data ?? "") as Lead;
+      if (lead && lead.id) store.leads[lead.id] = lead;
+    } catch {}
+  }
+  for (const row of kvRows) {
+    try {
+      if (row.key === "conversations") store.conversations = JSON.parse(row.data ?? "") as Record<string, Conversation>;
+      else if (row.key === "enrollments") store.enrollments = JSON.parse(row.data ?? "") as Enrollment[];
+      else if (row.key === "kb") store.kb = { ...store.kb, ...(JSON.parse(row.data ?? "") as KbConfig) };
+    } catch {}
   }
 }
 
 export function saveStore(): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2));
+  const database = openDb();
+  database.exec("BEGIN");
+  try {
+    database.prepare("DELETE FROM leads").run();
+    database.prepare("DELETE FROM kv").run();
+    const leadStmt = database.prepare("INSERT OR REPLACE INTO leads (id, data) VALUES (?, ?)");
+    for (const lead of Object.values(store.leads)) leadStmt.run(lead.id, JSON.stringify(lead));
+    const kvStmt = database.prepare("INSERT OR REPLACE INTO kv (key, data) VALUES (?, ?)");
+    kvStmt.run("conversations", JSON.stringify(store.conversations));
+    kvStmt.run("kb", JSON.stringify(store.kb));
+    kvStmt.run("enrollments", JSON.stringify(store.enrollments));
+    database.exec("COMMIT");
+  } catch (err) {
+    database.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+export function listEnrollments(): Enrollment[] {
+  return store.enrollments;
+}
+
+export function saveEnrollment(enrollment: Enrollment): Enrollment {
+  const idx = store.enrollments.findIndex((e) => e.id === enrollment.id);
+  if (idx >= 0) store.enrollments[idx] = enrollment;
+  else store.enrollments.push(enrollment);
+  saveStore();
+  return enrollment;
 }
 
 export function listLeads(): Lead[] {
@@ -174,6 +260,11 @@ export function listConversations(): Conversation[] {
 }
 
 export function resetStore(): void {
-  store = { leads: {}, conversations: {}, kb: { faqs: [] } };
-  if (fs.existsSync(DATA_FILE)) fs.rmSync(DATA_FILE);
+  store = emptyStore();
+  const database = openDb();
+  database.exec("DELETE FROM leads");
+  database.exec("DELETE FROM kv");
+  if (fs.existsSync(LEGACY_FILE)) fs.rmSync(LEGACY_FILE);
 }
+
+loadStore();
