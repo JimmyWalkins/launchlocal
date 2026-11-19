@@ -284,6 +284,60 @@ assert.equal(unrelated.statusCode, 200, "non-checkout events acknowledged");
 
 console.log("stripe webhook:", hookOk.statusCode, "| lead marked won | bad/stale/unsigned rejected");
 
+const gbpRes = await dispatch("POST", "/api/gbp", { leadId: goodLead.id });
+assert.equal(gbpRes.statusCode, 200, "GBP pack works");
+const gbpPack = json(gbpRes).pack;
+assert.ok(gbpPack.checklist.length >= 5 && gbpPack.postIdeas.length >= 4, "GBP pack has checklist + post ideas");
+assert.ok(json(await dispatch("GET", "/api/leads")).leads.find((l) => l.id === goodLead.id)?.gbp, "GBP pack persisted on lead");
+
+const reviewReq = await dispatch("POST", "/api/reviews/request", { leadId: goodLead.id, customerPhone: "+16615550143", customerName: "Pat" });
+assert.equal(reviewReq.statusCode, 200, "review request works");
+const reviewBody = json(reviewReq);
+assert.ok(reviewBody.link.includes("google.com"), "review link points at Google");
+assert.equal(reviewBody.sent.provider, "none", "review SMS no-ops without Twilio but is journaled");
+const reviewLead = json(await dispatch("GET", "/api/leads")).leads.find((l) => l.id === goodLead.id);
+assert.ok(reviewLead.timeline.some((t) => t.event === "review_request_sent"), "review request journaled to timeline");
+assert.ok(reviewLead.outreach.some((o) => o.body.includes("google.com")), "review message journaled to outreach");
+
+const intakeBad = await dispatch("POST", "/api/intake", { leadId: goodLead.id, name: "No Contact" });
+assert.equal(intakeBad.statusCode, 400, "intake without contact info rejected");
+const intakeBadLead = await dispatch("POST", "/api/intake", { leadId: "nope", name: "X", phone: "123" });
+assert.equal(intakeBadLead.statusCode, 400, "intake for unknown site rejected");
+const intake = await dispatch("POST", "/api/intake", { leadId: goodLead.id, name: "Jane Q", phone: "+16615550123", message: "water heater replacement" });
+assert.equal(intake.statusCode, 200, "intake works");
+assert.equal(json(intake).ok, true, "intake acknowledged");
+const intakeLead = json(await dispatch("GET", "/api/leads")).leads.find((l) => l.id === goodLead.id);
+assert.ok(intakeLead.timeline.some((t) => t.event === "site_lead_in" && t.detail.includes("Jane Q") && t.detail.includes("water heater")), "site lead captured on timeline");
+
+const ads = await dispatch("POST", "/api/ads-audit", { monthlySpend: 500, tracksConversions: false, hasNegativeKeywords: false, broadMatchOnly: true });
+assert.equal(ads.statusCode, 200, "ads audit works");
+const adsBody = json(ads);
+assert.ok(adsBody.findings.length >= 3, "ads audit finds waste when tracking/negatives missing");
+assert.ok(adsBody.estimatedMonthlyWaste > 0, "ads audit estimates monthly waste");
+assert.ok(adsBody.pitch.includes("299"), "ads audit pitches SEO Care");
+
+const reportPrev = await dispatch("POST", "/api/report", { leadId: goodLead.id });
+assert.equal(reportPrev.statusCode, 200, "report preview works");
+const reportBody = json(reportPrev);
+assert.ok(reportBody.report.business && Array.isArray(reportBody.report.summary), "report has business + summary");
+assert.ok(reportBody.report.activity.siteLeads >= 1, "report counts site leads captured via /api/intake");
+const reportSend = await dispatch("POST", "/api/report", { leadId: goodLead.id, send: true });
+assert.equal(reportSend.statusCode, 200, "report send works");
+const sentLead = json(await dispatch("GET", "/api/leads")).leads.find((l) => l.id === goodLead.id);
+assert.ok(sentLead.lastReportAt, "report send stamps lastReportAt");
+
+assert.ok(overridden.body.includes("/api/intake"), "client sites render a lead-intake form posting to /api/intake");
+
+const onboard = json(await dispatch("GET", "/api/sequences")).enrollments.find((e) => e.leadId === goodLead.id && e.seqName === "onboarding");
+assert.ok(onboard, "payment auto-enrolled the onboarding sequence");
+assert.ok(onboard.steps.some((s) => s.label.includes("welcome")), "onboarding starts with welcome step");
+const obTick = await tickSequences(Date.now() + 3 * 86400000);
+const onboardAfter = json(await dispatch("GET", "/api/sequences")).enrollments.find((e) => e.seqName === "onboarding");
+assert.equal(onboardAfter.steps[0].status, "sent", "onboarding welcome step fired on tick");
+assert.equal(onboardAfter.steps[2].status, "pending", "onboarding day 9 step still pending");
+
+console.log("client tools:", `gbp=${gbpPack.source} review=journaled intake=journaled adsFindings=${adsBody.findings.length} waste=$${adsBody.estimatedMonthlyWaste} onboardingStep1=${onboardAfter.steps[0].status}`);
+
 assert.ok(fs.existsSync("data/launchlocal.db"), "SQLite database file created");
 const storeLib = await import("../src/lib/store.ts");
 storeLib.loadStore();

@@ -33,6 +33,14 @@ export interface SeoPack {
   source: "ai" | "heuristic";
 }
 
+export interface GbpPack {
+  checklist: string[];
+  postIdeas: string[];
+  photoIdeas: string[];
+  categories?: string[];
+  source: "ai" | "heuristic";
+}
+
 export const CRM_STATUSES = ["new", "contacted", "qualified", "proposal", "won", "lost"] as const;
 export type CrmStatus = (typeof CRM_STATUSES)[number];
 
@@ -60,6 +68,9 @@ export interface Lead {
   seo?: SeoPack;
   siteUrl?: string;
   outreach?: { channel: "email" | "sms"; to: string; sentAt: string; provider: string; ok: boolean; body: string }[];
+  gbp?: GbpPack;
+  lastReportAt?: string;
+  reviewLink?: string;
   createdAt: string;
 }
 
@@ -220,6 +231,11 @@ export function updateLead(id: string, patch: Partial<Lead>): Lead | undefined {
 export function findLeadByPhone(phone: string): Lead | undefined {
   const digits = phone.replace(/\D/g, "").slice(-10);
   return Object.values(store.leads).find((l) => l.phone && l.phone.replace(/\D/g, "").slice(-10) === digits);
+}
+
+export function findContactEmail(leadId: string): string | undefined {
+  const conv = Object.values(store.conversations).find((c) => c.leadId === leadId && c.contact?.email);
+  return conv?.contact?.email;
 }
 
 export function getConversation(sessionId: string): Conversation {

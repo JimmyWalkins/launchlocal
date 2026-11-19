@@ -42,7 +42,7 @@ async function refreshLeads() {
   if (!res || !res.ok) return;
   const data = await res.json();
   leadsCache = data.leads ?? [];
-  for (const sel of ["a-lead", "w-lead", "s-lead", "o-lead"]) {
+  for (const sel of ["a-lead", "w-lead", "s-lead", "o-lead", "c-lead"]) {
     const el = $(sel);
     const current = el.value;
     el.innerHTML =
@@ -219,6 +219,66 @@ $("btn-outreach").addEventListener("click", async () => {
     out.innerHTML = note(err.message, "err");
   } finally {
     btn.disabled = false;
+  }
+});
+
+function clientNote(html, kind = "ok-note") {
+  $("client-out").innerHTML = note(html, kind);
+}
+
+$("btn-report").addEventListener("click", async () => {
+  const leadId = $("c-lead").value;
+  if (!leadId) return clientNote("Pick a client lead first.", "err");
+  clientNote("Building + emailing the monthly report…", "warn");
+  try {
+    const data = await post("/report", { leadId, send: true });
+    clientNote(
+      `${data.ok ? "Report sent" : "Report generated but <em>not sent</em>: ${esc(data.detail)}"} — audit score <strong>${data.report.auditScore ?? "—"}</strong>, ${data.report.activity.siteLeads} site leads, ${data.report.activity.payments} payments.`,
+    );
+  } catch (err) {
+    clientNote(err.message, "err");
+  }
+});
+
+$("btn-gbp").addEventListener("click", async () => {
+  const leadId = $("c-lead").value;
+  if (!leadId) return clientNote("Pick a client lead first.", "err");
+  clientNote("Building the Google Business Profile pack…", "warn");
+  try {
+    const data = await post("/gbp", { leadId });
+    const p = data.pack;
+    clientNote(
+      `<strong>GBP pack (${esc(p.source)}, ${p.checklist.length} steps)</strong><ol>${p.checklist.map((c) => `<li>${esc(c)}</li>`).join("")}</ol><strong>Weekly post ideas:</strong><br>${p.postIdeas.map((i) => `• ${esc(i)}`).join("<br>")}`,
+    );
+  } catch (err) {
+    clientNote(err.message, "err");
+  }
+});
+
+$("btn-ads").addEventListener("click", async () => {
+  const leadId = $("c-lead").value;
+  if (!leadId) return clientNote("Pick a client lead first.", "err");
+  clientNote("Auditing their ads for waste (answering 'no' where you don't know = assume gap)…", "warn");
+  try {
+    const data = await post("/ads-audit", { monthlySpend: Number(prompt("Monthly ad spend in $ (0 if unsure)?")) || 0 });
+    clientNote(
+      `<strong>Health: ${data.score}/100.</strong> ${esc(data.verdict)}${data.estimatedMonthlyWaste > 0 ? ` Estimated waste: <strong>~$${data.estimatedMonthlyWaste}/mo</strong>.` : ""}<ul>${data.findings.map((f) => `<li>[${f.severity}] <strong>${esc(f.title)}</strong> — ${esc(f.detail)}</li>`).join("")}</ul>Pitch: <em>${esc(data.pitch)}</em>`,
+    );
+  } catch (err) {
+    clientNote(err.message, "err");
+  }
+});
+
+$("btn-review").addEventListener("click", async () => {
+  const leadId = $("c-lead").value;
+  const phone = $("rv-phone").value.trim();
+  if (!leadId || !phone) return clientNote("Pick a client lead and enter the customer's phone.", "err");
+  clientNote("Sending review link…", "warn");
+  try {
+    const data = await post("/reviews/request", { leadId, customerPhone: phone, customerName: $("rv-name").value.trim() || undefined });
+    clientNote(`Review link: <a href="${esc(data.link)}" target="_blank" rel="noopener">${esc(data.link)}</a> — send: ${data.sent.ok ? "sent" : `preview only (${esc(data.sent.provider)})`}`);
+  } catch (err) {
+    clientNote(err.message, "err");
   }
 });
 

@@ -49,6 +49,7 @@
     <button class="tab" data-tab="website">3 · Build website</button>
     <button class="tab" data-tab="seo">4 · SEO pack</button>
     <button class="tab" data-tab="outreach">5 · Email / SMS</button>
+    <button class="tab" data-tab="client">6 · Client tools</button>
   </div>
 
   <section class="panel active" id="panel-leads">
@@ -105,6 +106,26 @@
     <input id="o-sms" placeholder="+16615550134 (leave empty for preview only)">
     <button class="go" id="btn-outreach">Draft outreach</button>
     <div id="outreach-out"></div>
+  </section>
+
+  <section class="panel" id="panel-client">
+    <h2>Client tools</h2>
+    <p class="hint">Everything after the sale: monthly progress reports (keeps your $299/mo renewals), Google Business Profile packs, review-request texts, and Google/Facebook ads waste audits.</p>
+    <label for="c-lead">Pick a client lead</label>
+    <select id="c-lead"></select>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button class="go" id="btn-report">Email monthly report</button>
+      <button class="go" id="btn-gbp">GBP optimization pack</button>
+      <button class="go" id="btn-ads">Audit their ads for waste</button>
+    </div>
+    <div style="margin-top:16px;border-top:1px solid #eee4d8;padding-top:10px">
+      <label for="rv-name">Review request — customer name</label>
+      <input id="rv-name" placeholder="Happy customer's first name">
+      <label for="rv-phone">Review request — customer phone</label>
+      <input id="rv-phone" placeholder="+16615550134">
+      <button class="go" id="btn-review">Text the review link</button>
+    </div>
+    <div id="client-out"></div>
   </section>
 </div>
 <script type="module" src="/app.js"></script>

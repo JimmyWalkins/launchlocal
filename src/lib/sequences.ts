@@ -1,8 +1,8 @@
 import { sendEmail, sendSms } from "./notify.ts";
 import {
+  findContactEmail,
   getKb,
   getLead,
-  listConversations,
   listEnrollments,
   saveEnrollment,
   saveStore,
@@ -23,6 +23,32 @@ interface StepDef {
 }
 
 export const SEQUENCES: Record<string, StepDef[]> = {
+  onboarding: [
+    {
+      day: 0,
+      channel: "email",
+      label: "day 0 email: welcome + kickoff checklist",
+      subject: "Welcome aboard — here's the kickoff plan",
+      body: (lead) =>
+        `Welcome aboard, ${lead.name}! You're paid up and we're on it. This week: (1) we need 5-10 photos and your opening hours, (2) reply with the top services you want customers to find, (3) a 15-min kickoff call link comes separately. Your one-page site${lead.siteUrl ? ` preview is at ${lead.siteUrl}` : " draft is being built today"}. — Launch Local 661`,
+    },
+    {
+      day: 2,
+      channel: "email",
+      label: "day 2 email: assets nudge",
+      subject: "Need team photos + your service list",
+      body: (lead) =>
+        `Hi ${lead.name} — to finish your site we still need photos and your service priorities. Reply with a few phone-shot photos and we handle the rest. Nothing else blocks launch. — Launch Local 661`,
+    },
+    {
+      day: 9,
+      channel: "email",
+      label: "day 9 email: first report + review ask",
+      subject: "First progress check — and how about a review?",
+      body: (lead, offer) =>
+        `Hi ${lead.name} — week one down: your site${lead.siteUrl ? ` (${lead.siteUrl})` : ""} is being tuned, SEO pass under way, and you'll get a progress email every week like clockwork (${offer || "the plan you chose"}). If anything's unclear, reply here. — Launch Local 661`,
+    },
+  ],
   standard: [
     {
       day: 1,
@@ -52,8 +78,7 @@ export const SEQUENCES: Record<string, StepDef[]> = {
 };
 
 function findEmailFor(leadId: string): string | undefined {
-  const conv = listConversations().find((c) => c.leadId === leadId && c.contact?.email);
-  return conv?.contact?.email;
+  return findContactEmail(leadId) ?? process.env.CLIENT_ALERT_EMAIL?.trim() ?? undefined;
 }
 
 export function enrollLead(leadId: string, seqName = "standard"): { ok: true; enrollment: Enrollment } | { ok: false; error: string } {
@@ -108,7 +133,7 @@ export async function tickSequences(now = Date.now()): Promise<{ checked: number
         touched = true;
         continue;
       }
-      if (lead.status === "won" || lead.status === "lost") {
+      if ((lead.status === "won" || lead.status === "lost") && enrollment.seqName !== "onboarding") {
         step.status = "skipped";
         step.detail = `lead status is ${lead.status}`;
         skipped++;

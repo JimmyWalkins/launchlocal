@@ -75,6 +75,43 @@ function footerHtml(ctx: TemplateContext): string {
   return `© ${new Date().getFullYear()} ${escapeHtml(lead.name)} · ${escapeHtml(lead.city)}${audit ? ` · Site audit score improved from ${audit.score}/100` : ""}`;
 }
 
+function intakeCss(accent: string): string {
+  return `
+  .intake{display:grid;gap:10px;max-width:480px;margin:16px auto 0}
+  .intake input,.intake textarea{padding:12px;border:1px solid #d1d5db;border-radius:8px;font:inherit;width:100%}
+  .intake button{background:${accent};color:#fff;border:0;padding:12px 20px;border-radius:8px;font-weight:700;cursor:pointer}
+  .intake-note{color:${accent};font-weight:600;margin:0}`;
+}
+
+function intakeForm(ctx: TemplateContext): string {
+  const leadId = JSON.stringify(ctx.lead.id).replace(/</g, "\\u003c");
+  return `<div class="intake-outer">
+  <form class="intake" onsubmit="return submitIntake(event)">
+    <input name="name" placeholder="Your name" required>
+    <input name="phone" placeholder="Phone" required>
+    <input name="email" type="email" placeholder="Email (optional)">
+    <textarea name="message" placeholder="What do you need?" rows="3"></textarea>
+    <button type="submit">Send request</button>
+    <p class="intake-note" hidden>Sent! We'll get back to you shortly.</p>
+  </form>
+  </div>
+<script>
+async function submitIntake(e){
+  e.preventDefault();
+  const form = e.target;
+  const fields = new FormData(form);
+  try {
+    await fetch('/api/intake', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leadId: ${leadId}, name: fields.get('name'), phone: fields.get('phone'), email: fields.get('email'), message: fields.get('message') }) });
+    form.querySelector('.intake-note').hidden = false;
+    form.querySelector('button').disabled = true;
+  } catch (err) {
+    form.querySelector('button').textContent = 'Call us instead — send failed';
+  }
+  return false;
+}
+</script>`;
+}
+
 function docHead(title: string, description: string, schema: object, css: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -112,6 +149,7 @@ const classicTemplate: TemplateDef = {
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
   .card{border:1px solid #e5e7eb;border-radius:10px;padding:18px;font-weight:600;background:#fafafa}
   footer{background:${theme.dark};color:#fff;padding:32px;text-align:center}
+  ${intakeCss(theme.accent)}
 `)}
 <body>
 <header>
@@ -134,6 +172,7 @@ const classicTemplate: TemplateDef = {
 <section id="contact">
   <h2>Get a free quote</h2>
   <p>Call <strong>${lead.phone ?? "us today"}</strong> or visit us at ${escapeHtml(lead.address ?? lead.city)}.</p>
+  ${intakeForm(ctx)}
 </section>
 <footer>${footerHtml(ctx)}</footer>
 </body>
@@ -169,6 +208,7 @@ const spotlightTemplate: TemplateDef = {
   .about{max-width:64ch}
   footer{background:#f5f0e8;padding:28px;text-align:center;color:#78716c;font-family:system-ui,sans-serif;font-size:14px}
   @media(max-width:760px){.hero{grid-template-columns:1fr}.hero-img{min-height:220px}}
+  ${intakeCss(theme.accent)}
 `)}
 <body>
 <nav class="nav"><b>${escapeHtml(lead.name)}</b><a href="tel:${lead.phone ?? ""}">Call ${escapeHtml(lead.phone ?? "us")}</a></nav>
@@ -188,6 +228,11 @@ const spotlightTemplate: TemplateDef = {
   <h2>About ${escapeHtml(lead.name)}</h2>
   <p>${copy.about}</p>
   <p style="margin-top:12px">${trustHtml(ctx)}</p>
+</section>
+<section id="contact">
+  <h2>Request a quote</h2>
+  <p>Call <strong>${escapeHtml(lead.phone ?? "us")}</strong> or send a request — we answer fast.</p>
+  ${intakeForm(ctx)}
 </section>
 <div class="band">
   Ready when you are — call, or stop by in ${escapeHtml(lead.city)}.
@@ -235,10 +280,12 @@ const trustbarTemplate: TemplateDef = {
   ol{padding-left:0;list-style:none;counter-reset:none}
   ol li{padding:14px 0;border-bottom:1px solid #e5e7eb;font-size:17px}
   ol li b{color:${theme.accent};margin-right:8px}
+  .contact-form{text-align:left}
   .midcta{background:${theme.accent};color:#fff;text-align:center;padding:40px 24px}
   .midcta a{display:inline-block;margin-top:14px;background:#fff;color:${theme.dark};padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:800;font-size:17px}
   .about{color:#374151;max-width:64ch}
   footer{background:#111827;color:#9ca3af;padding:26px;text-align:center;font-size:14px}
+  ${intakeCss(theme.accent)}
 `)}
 <body>
 <div class="topbar"><b>${escapeHtml(lead.name)}</b><a href="tel:${lead.phone ?? ""}">Call now</a></div>
@@ -255,9 +302,9 @@ const trustbarTemplate: TemplateDef = {
   One call gets it handled — serving ${escapeHtml(lead.city)} and nearby.
   <br><a href="tel:${lead.phone ?? ""}">Call ${escapeHtml(lead.phone ?? "now")}</a>
 </div>
-<section class="about">
-  <h2>Why ${escapeHtml(lead.name)}?</h2>
-  <p>${copy.about}</p>
+<section class="about contact-form">
+  <h2>Request a free quote</h2>
+  ${intakeForm(ctx)}
 </section>
 <footer>${footerHtml(ctx)}</footer>
 </body>
@@ -292,6 +339,7 @@ const minimalTemplate: TemplateDef = {
   .contact{background:#f9fafb;border-radius:14px;padding:32px;text-align:center;margin:24px 0}
   .contact b{color:${theme.accent}}
   footer{border-top:1px solid #e5e7eb;padding:24px;text-align:center;color:#6b7280;font-size:13px}
+  ${intakeCss(theme.accent)}
 `)}
 <body>
 <div class="wrap">
@@ -311,9 +359,10 @@ const minimalTemplate: TemplateDef = {
     <h2>About</h2>
     <p>${copy.about}</p>
   </section>
-  <section class="contact">
+  <section class="contact" id="contact">
     <h2 style="margin-bottom:8px">Get in touch</h2>
     <p>Call <b>${escapeHtml(lead.phone ?? "us today")}</b> or visit us at ${escapeHtml(lead.address ?? lead.city)}.</p>
+    ${intakeForm(ctx)}
   </section>
   <footer>${footerHtml(ctx)}</footer>
 </div>

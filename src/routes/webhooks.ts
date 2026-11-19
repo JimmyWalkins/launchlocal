@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { Router } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getLead, saveStore, updateLead } from "../lib/store.ts";
+import { enrollLead } from "../lib/sequences.ts";
 
 export const webhooks = Router();
 
@@ -87,6 +88,7 @@ webhooks.post("/stripe", (req: Request, res: Response) => {
         ],
       });
       saveStore();
+      enrollLead(lead.id, "onboarding");
     }
   }
 

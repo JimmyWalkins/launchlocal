@@ -29,6 +29,10 @@ import {
   type Lead,
 } from "../lib/store.ts";
 import { SEQUENCES, enrollLead, tickSequences } from "../lib/sequences.ts";
+import { buildReport, sendReport } from "../lib/reports.ts";
+import { buildGbpPack } from "../lib/gbp.ts";
+import { sendReviewRequest } from "../lib/reviews.ts";
+import { auditAds } from "../lib/ads.ts";
 import { hasPlaces, hasSmtp, hasTwilio } from "../lib/config.ts";
 
 export const api = Router();
@@ -42,6 +46,11 @@ const asString = (v: unknown): string => (typeof v === "string" ? v.trim() : "")
 const asNumber = (v: unknown): number | undefined => {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : undefined;
+};
+const asBoolOpt = (v: unknown): boolean | undefined => {
+  if (v === true || v === "yes" || v === "true" || v === 1 || v === "1") return true;
+  if (v === false || v === "no" || v === "false" || v === 0 || v === "0") return false;
+  return undefined;
 };
 
 api.get("/status", (_req, res) => {
@@ -329,6 +338,88 @@ api.get("/sequences", (_req, res) => {
 api.post("/sequences/tick", async (_req, res) => {
   const result = await tickSequences();
   res.json({ ok: true, ...result });
+});
+
+api.post("/report", async (req: Request, res: Response) => {
+  const leadId = asString(req.body?.leadId);
+  if (!leadId) return bad(res, "Provide 'leadId'.");
+  const lead = getLead(leadId);
+  if (!lead) return bad(res, `Unknown leadId: ${leadId}`);
+  if (req.body?.send !== true) {
+    res.json({ ok: true, report: buildReport(lead), note: "Preview only \u2014 pass send:true to email it to the client." });
+    return;
+  }
+  const result = await sendReport(leadId);
+  res.json(result);
+});
+
+api.post("/gbp", async (req: Request, res: Response) => {
+  const leadId = asString(req.body?.leadId);
+  if (!leadId) return bad(res, "Provide 'leadId'.");
+  const lead = getLead(leadId);
+  if (!lead) return bad(res, `Unknown leadId: ${leadId}`);
+  try {
+    const result = await buildGbpPack(leadId);
+    res.json({ leadId, pack: result.pack });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "GBP pack failed" });
+  }
+});
+
+api.post("/reviews/request", async (req: Request, res: Response) => {
+  const leadId = asString(req.body?.leadId);
+  const customerPhone = asString(req.body?.customerPhone);
+  if (!leadId) return bad(res, "Provide 'leadId'.");
+  if (!customerPhone) return bad(res, "Provide 'customerPhone' (the happy customer's mobile number).");
+  if (!getLead(leadId)) return bad(res, `Unknown leadId: ${leadId}`);
+  const result = await sendReviewRequest({
+    leadId,
+    customerPhone,
+    customerName: asString(req.body?.customerName) || undefined,
+    businessName: asString(req.body?.businessName) || undefined,
+  });
+  res.json(result);
+});
+
+api.post("/intake", async (req: Request, res: Response) => {
+  const body = req.body as Record<string, unknown>;
+  const leadId = asString(body.leadId);
+  const name = asString(body.name);
+  const phone = asString(body.phone);
+  const email = asString(body.email);
+  const message = asString(body.message);
+  if (!leadId || !getLead(leadId)) return bad(res, "Unknown site \u2014 missing or invalid leadId.");
+  if (!name || (!phone && !email)) return bad(res, "Provide at least a name and a phone or email.");
+  const lead = getLead(leadId)!;
+  updateLead(leadId, {
+    timeline: [
+      ...(lead.timeline ?? []),
+      { ts: new Date().toISOString(), event: "site_lead_in", detail: `${name} \u00b7 ${phone || "no phone"} \u00b7 ${email || "no email"} \u00b7 ${message || "no message"}` },
+    ],
+  });
+  const alertTo = process.env.CLIENT_ALERT_EMAIL?.trim();
+  let notified: { ok: boolean; provider: string } | null = null;
+  if (alertTo) {
+    const outcome = await sendEmail(alertTo, `New lead from ${lead.name} website`, `Name: ${name}\nPhone: ${phone || "\u2014"}\nEmail: ${email || "\u2014"}\nMessage: ${message || "\u2014"}`);
+    notified = { ok: outcome.ok, provider: outcome.provider };
+  }
+  saveStore();
+  res.json({ ok: true, notified });
+});
+
+api.post("/ads-audit", async (req: Request, res: Response) => {
+  const b = req.body as Record<string, unknown>;
+  const result = await auditAds({
+    monthlySpend: asNumber(b.monthlySpend),
+    tracksConversions: asBoolOpt(b.tracksConversions),
+    hasNegativeKeywords: asBoolOpt(b.hasNegativeKeywords),
+    hasLandingPage: asBoolOpt(b.hasLandingPage),
+    targetsOwnBusinessName: asBoolOpt(b.targetsOwnBusinessName),
+    broadMatchOnly: asBoolOpt(b.broadMatchOnly),
+    multipleAdVariants: asBoolOpt(b.multipleAdVariants),
+    callTracking: asBoolOpt(b.callTracking),
+  });
+  res.json(result);
 });
 
 api.get("/conversations", (_req, res) => {

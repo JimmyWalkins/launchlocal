@@ -15,7 +15,12 @@ A full local-marketing toolkit for small businesses (starting in Bakersfield, CA
    - **Channels**: the website chat widget lives at `/chat` (embed it anywhere: `<iframe src="https://YOURHOST/chat?leadId=...">`); inbound email replies go to `POST /api/agent/email`; inbound SMS (Twilio webhook compatible, answers in TwiML) go to `POST /api/agent/sms`. Every turn is journaled into RAG and the lead's CRM timeline.
    - Works with **zero keys** in rule-based fallback mode (booking/pricing/checkout intents still work); add `MISTRAL_API_KEY` to enable the real LLM agent loop.
 7. **Scheduled follow-up sequences** — enroll a lead in a drip sequence (default `standard`: day 1 email recap → day 3 SMS nudge → day 7 final email). A ticker runs at boot and every 60s, sends due steps via the same SMTP/Twilio senders, journals every step to the lead's outreach log + CRM timeline, and auto-stops sequences for leads marked won/lost. Enroll with `POST /api/sequences/enroll {leadId, seqName?}`; inspect with `GET /api/sequences`; force a run with `POST /api/sequences/tick`. Sends degrade gracefully to journaled no-ops without keys.
-8. **Stripe payment webhooks** — `POST /webhooks/stripe` verifies the `Stripe-Signature` HMAC (timing-safe, 5-minute tolerance) against `STRIPE_WEBHOOK_SECRET` over the raw request body, then marks the matching lead (via `client_reference_id`) **won** with a `payment_received` timeline event. Point a Stripe CLI forward or your Stripe dashboard webhook at `https://YOURHOST/webhooks/stripe` in production.
+8. **Stripe payment webhooks** — `POST /webhooks/stripe` verifies the `Stripe-Signature` HMAC (timing-safe, 5-minute tolerance) against `STRIPE_WEBHOOK_SECRET` over the raw request body, then marks the matching lead (via `client_reference_id`) **won** with a `payment_received` timeline event — and **auto-enrolls the new client in the `onboarding` sequence** (welcome + kickoff checklist day 0, assets nudge day 2, first report + review ask day 9). Point a Stripe CLI forward or your Stripe dashboard webhook at `https://YOURHOST/webhooks/stripe` in production.
+9. **Client monthly reports** — `buildReport` turns audit score, SEO state, follow-up attempts, site-captured leads, and payments into a plain-English text report. `POST /api/report {leadId}` previews it; `POST /api/report {leadId, send:true}` emails it to the client (conversation email on file, or `CLIENT_ALERT_EMAIL`). Won leads get one automatically every 7 days via the ticker, stamped `lastReportAt` and journaled as `report_sent`.
+10. **Google Business Profile packs** — `POST /api/gbp {leadId}` produces a 10-step optimization checklist, 4 weekly GBP post ideas, and photo ideas (AI when `MISTRAL_API_KEY` is set, industry-aware heuristic otherwise). Persisted on the lead as `gbp`.
+11. **Review generation** — `POST /api/reviews/request {leadId, customerPhone, customerName?}` texts the happy customer a Google review link (uses `GOOGLE_REVIEW_URL` when set — get your client's Place ID review link from their GBP dashboard; falls back to a search link). Journaled to outreach + timeline; sell it as a $99/mo "review boost".
+12. **Site lead intake** — every generated template now includes a **lead-capture form** (name/phone/email/message) that posts to `POST /api/intake`. The lead is captured on the client's CRM timeline as `site_lead_in`, and `CLIENT_ALERT_EMAIL` gets an instant notification email when set. This closes the loop: the $497 site actually captures customers for your client.
+13. **Ads waste audit** — `POST /api/ads-audit {monthlySpend, tracksConversions?, hasNegativeKeywords?, ...}` scores an existing Google/Facebook ads account and itemizes waste with dollar estimates ("~$125/mo on irrelevant searches") — a foot-in-the-door pitch for SEO Care that ends with a ready-made sell line. AI-enhanced with a sharp heuristic fallback.
 
 ## Run locally
 
@@ -49,7 +54,12 @@ All endpoints live under `/api`:
 | POST | `/api/sequences/enroll` | `{leadId, seqName?}` | enroll lead in a follow-up drip sequence |
 | GET | `/api/sequences` | — | available sequences + all enrollments/step state |
 | POST | `/api/sequences/tick` | — | run due sequence steps now (also auto-runs every 60s) |
-| POST | `/webhooks/stripe` | Stripe event (raw body + `Stripe-Signature`) | signature-verified; `checkout.session.completed` marks lead won |
+| POST | `/webhooks/stripe` | Stripe event (raw body + `Stripe-Signature`) | signature-verified; `checkout.session.completed` marks lead won + enrolls onboarding |
+| POST | `/api/report` | `{leadId, send?}` | client monthly report (preview, or email with `send:true`; auto weekly for won leads) |
+| POST | `/api/gbp` | `{leadId}` | Google Business Profile optimization pack |
+| POST | `/api/reviews/request` | `{leadId, customerPhone, customerName?}` | text a customer the client's Google review link |
+| POST | `/api/intake` | `{leadId, name, phone?, email?, message?}` | lead-capture form endpoint used by generated client sites |
+| POST | `/api/ads-audit` | `{monthlySpend, ...yes/no flags}` | Google/Facebook ads waste audit + pitch |
 | GET | `/api/conversations` | — | journaled conversations |
 | POST | `/api/seo` | `{leadId}` | generate SEO pack |
 | POST | `/api/site` | `{leadId, template?}` | build & serve one-page site (template optional; auto-matches category) |
@@ -83,7 +93,11 @@ src/lib/embed.ts        mistral-embed embeddings + keyword-overlap fallback
 src/lib/calendar.ts     Cal.com / Calendly booking links
 src/lib/payments.ts     Stripe checkout links (REST)
 src/lib/notify.ts       shared email (SMTP) and SMS (Twilio) senders
-src/lib/sequences.ts    scheduled follow-up drips (day 1/3/7) + ticker
+src/lib/sequences.ts    scheduled drips (standard + post-sale onboarding) + ticker
+src/lib/reports.ts      client monthly reports (build/render/send/weekly ticker)
+src/lib/gbp.ts          Google Business Profile optimization packs
+src/lib/reviews.ts      review-request texts (Google review links)
+src/lib/ads.ts          Google/Facebook ads waste audit
 src/routes/webhooks.ts  Stripe inbound webhook (signature verify -> lead 'won')
 src/lib/store.ts        SQLite persistence via node:sqlite (data/launchlocal.db; migrates legacy data/store.json)
 public/                 dashboard (/) and chat (/chat)

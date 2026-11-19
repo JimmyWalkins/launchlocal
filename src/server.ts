@@ -9,6 +9,7 @@ import { webhooks } from "./routes/webhooks.ts";
 import { config } from "./lib/config.ts";
 import { reindexAll } from "./lib/kb.ts";
 import { tickSequences } from "./lib/sequences.ts";
+import { tickReports } from "./lib/reports.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -89,10 +90,11 @@ app.use((req: Request, res: Response) => {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   void tickSequences();
-  const sequenceTimer = setInterval(() => {
+  const schedulerTimer = setInterval(() => {
     void tickSequences();
+    void tickReports();
   }, 60_000);
-  sequenceTimer.unref();
+  schedulerTimer.unref();
   const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, () => {
     console.log(`launchlocal listening on http://localhost:${PORT}`);
