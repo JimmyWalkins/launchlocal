@@ -49,6 +49,48 @@ export const SEQUENCES: Record<string, StepDef[]> = {
         `Hi ${lead.name} — week one down: your site${lead.siteUrl ? ` (${lead.siteUrl})` : ""} is being tuned, SEO pass under way, and you'll get a progress email every week like clockwork (${offer || "the plan you chose"}). If anything's unclear, reply here. — Launch Local 661`,
     },
   ],
+  daily: [
+    {
+      day: 1,
+      channel: "email",
+      label: "day 1 email: the audit number",
+      subject: "Your free audit found something",
+      body: (lead, offer) =>
+        `Hi ${lead.name} team — daily tip #1: your audit numbers${offer ? ` and our plan (${offer})` : ""} are ready. Reply "send it" and you'll have the full report in your inbox in minutes. — Launch Local 661`,
+    },
+    {
+      day: 2,
+      channel: "sms",
+      label: "day 2 SMS: speed fact",
+      subject: "",
+      body: (lead) =>
+        `Day 2 tip for ${lead.name}: if your site takes 3+ seconds to load, about half your mobile visitors leave first. Free speed check: just reply LINK. — Launch Local 661`,
+    },
+    {
+      day: 3,
+      channel: "email",
+      label: "day 3 email: competitors",
+      subject: "Who's outranking you in the map pack",
+      body: (lead) =>
+        `Hi ${lead.name} — day 3: we checked who shows up above you when ${lead.city} locals search "${lead.category} near me". Want the list + what they're doing differently? Reply YES. — Launch Local 661`,
+    },
+    {
+      day: 4,
+      channel: "sms",
+      label: "day 4 SMS: quick win",
+      subject: "",
+      body: (lead) =>
+        `Day 4 tip: businesses with 15+ Google reviews get called roughly twice as often. Free review-repair plan for ${lead.name}: reply PLAN. — Launch Local 661`,
+    },
+    {
+      day: 5,
+      channel: "email",
+      label: "day 5 email: last call",
+      subject: "Last day of tips — here's the offer",
+      body: (lead, offer) =>
+        `Hi ${lead.name} — last tip of the week. We're holding your free audit + a fixed quote: ${offer || "$497 flat, one-page site, live in 7 days"}. Reply BOOK and we'll grab 15 minutes this week. If not, no more emails from us. — Launch Local 661`,
+    },
+  ],
   standard: [
     {
       day: 1,
@@ -79,6 +121,14 @@ export const SEQUENCES: Record<string, StepDef[]> = {
 
 function findEmailFor(leadId: string): string | undefined {
   return findContactEmail(leadId) ?? process.env.CLIENT_ALERT_EMAIL?.trim() ?? undefined;
+}
+
+function sendWindowActive(): boolean {
+  const start = Number(process.env.SEND_WINDOW_START ?? 8);
+  const end = Number(process.env.SEND_WINDOW_END ?? 20);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start === end) return true;
+  const hour = new Date().getHours();
+  return start < end ? hour >= start && hour < end : hour >= start || hour < end;
 }
 
 export function enrollLead(leadId: string, seqName = "standard"): { ok: true; enrollment: Enrollment } | { ok: false; error: string } {
@@ -115,10 +165,13 @@ export function enrollLead(leadId: string, seqName = "standard"): { ok: true; en
   return { ok: true, enrollment };
 }
 
-export async function tickSequences(now = Date.now()): Promise<{ checked: number; sent: number; skipped: number }> {
+export async function tickSequences(now = Date.now()): Promise<{ checked: number; sent: number; skipped: number; deferred: boolean }> {
   const offer = getKb().offer ?? "";
   let sent = 0;
   let skipped = 0;
+  if (!sendWindowActive()) {
+    return { checked: listEnrollments().filter((e) => e.status === "active").length, sent: 0, skipped: 0, deferred: true };
+  }
   for (const enrollment of listEnrollments()) {
     if (enrollment.status !== "active") continue;
     let touched = false;
@@ -197,5 +250,5 @@ export async function tickSequences(now = Date.now()): Promise<{ checked: number
     }
   }
   if (sent || skipped) saveStore();
-  return { checked: listEnrollments().length, sent, skipped };
+  return { checked: listEnrollments().length, sent, skipped, deferred: false };
 }

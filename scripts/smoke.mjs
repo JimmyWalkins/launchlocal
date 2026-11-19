@@ -10,6 +10,8 @@ import { tickSequences } from "../src/lib/sequences.ts";
 resetStore();
 const WEBHOOK_SECRET = "whsec_smoke_test";
 process.env.STRIPE_WEBHOOK_SECRET = WEBHOOK_SECRET;
+process.env.SEND_WINDOW_START = "0";
+process.env.SEND_WINDOW_END = "24";
 
 function mockRes() {
   const res = new EventEmitter();
@@ -237,6 +239,37 @@ assert.ok(seqAfter.steps.every((s) => s.status === "sent" || s.status === "skipp
 assert.equal(json(await dispatch("GET", "/api/sequences")).enrollments.find((e) => e.leadId === goodLead.id).status, "done", "enrollment completes");
 
 console.log("sequences:", enroll.statusCode, `tick sent=${tick.sent} skipped=${tick.skipped}`);
+
+const storeLibEarly = await import("../src/lib/store.ts");
+const dailyLead = storeLibEarly.addLead({
+  id: "daily-lead",
+  name: "Daily Drip Dental",
+  category: "dentist",
+  city: "Bakersfield",
+  phone: "+16615550155",
+  score: 55,
+  status: "new",
+  timeline: [],
+  source: "demo",
+  createdAt: new Date().toISOString(),
+});
+storeLibEarly.saveStore();
+
+const dailyEnroll = await dispatch("POST", "/api/sequences/enroll", { leadId: dailyLead.id, seqName: "daily" });
+assert.equal(dailyEnroll.statusCode, 200, "daily drip enroll works");
+assert.equal(json(dailyEnroll).enrollment.steps.length, 5, "daily drip has 5 consecutive-day steps");
+const dailyDup = await dispatch("POST", "/api/sequences/enroll", { leadId: dailyLead.id, seqName: "daily" });
+assert.equal(dailyDup.statusCode, 400, "daily drip duplicate enrollment rejected");
+
+await dispatch("POST", "/api/agent/email", { leadId: dailyLead.id, text: "what are the tips?", from: "second@example.com" });
+const dailyTick = await tickSequences(Date.now() + 6 * 86400000);
+assert.equal(dailyTick.deferred, false, "send window open in smoke");
+assert.equal(dailyTick.sent, 5, "all 5 daily drip steps fired (alternating email/SMS)");
+const dailyAfter = json(await dispatch("GET", "/api/sequences")).enrollments.find((e) => e.leadId === dailyLead.id && e.seqName === "daily");
+assert.ok(dailyAfter.status === "done" && dailyAfter.steps.every((s) => s.status === "sent"), "daily drip completes");
+const dailyLeadAfter = json(await dispatch("GET", "/api/leads")).leads.find((l) => l.id === dailyLead.id);
+assert.ok(dailyLeadAfter.timeline.filter((t) => t.event === "sequence_step_sent").length === 5, "daily steps journaled to timeline");
+console.log("daily drip:", `5/5 sent, alternating=${dailyAfter.steps.map((s) => s.channel[0]).join("")}`);
 
 const noSecretEnv = process.env.STRIPE_WEBHOOK_SECRET;
 delete process.env.STRIPE_WEBHOOK_SECRET;
