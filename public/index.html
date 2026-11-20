@@ -1,48 +1,133 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mistral Chat</title>
-    <style>
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        background: #f7f4ef;
-        color: #1c1c1c;
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
-      }
-      header {
-        padding: 12px 16px;
-        background: #ff7000;
-        color: #fff;
-        font-weight: 600;
-      }
-      #chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-      .msg { max-width: 75%; padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; line-height: 1.45; }
-      .user { align-self: flex-end; background: #ff7000; color: #fff; border-bottom-right-radius: 3px; }
-      .assistant { align-self: flex-start; background: #fff; border: 1px solid #e4ddd2; border-bottom-left-radius: 3px; }
-      .msg.error { align-self: center; background: #fdeaea; border: 1px solid #f2b8b5; color: #86231f; }
-      form { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #e4ddd2; background: #fff; }
-      input { flex: 1; padding: 10px 12px; border: 1px solid #d8d0c3; border-radius: 8px; font: inherit; }
-      button {
-        padding: 10px 18px; border: 0; border-radius: 8px; background: #1c1c1c; color: #fff;
-        font: inherit; font-weight: 600; cursor: pointer;
-      }
-      button:disabled { opacity: 0.5; cursor: default; }
-    </style>
-  </head>
-  <body>
-    <header>Mistral Chat — <span id="model">…</span></header>
-    <div id="chat"></div>
-    <form id="chat-form">
-      <input id="chat-input" type="text" placeholder="Type a message…" autocomplete="off" autofocus />
-      <button type="submit" id="send">Send</button>
-    </form>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LaunchLocal — Marketing Platform</title>
+<style>
+  *{box-sizing:border-box;margin:0}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f7f4ef;color:#1c1c1c;min-height:100vh}
+  header{background:#ff7000;color:#fff;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+  header h1{font-size:20px;font-weight:700}
+  header nav a{color:#fff;text-decoration:none;margin-left:16px;font-weight:600;opacity:.9}
+  header nav a:hover{opacity:1;text-decoration:underline}
+  .wrap{max-width:1100px;margin:0 auto;padding:20px}
+  .tabs{display:flex;gap:6px;margin:18px 0;flex-wrap:wrap}
+  .tab{padding:9px 16px;border-radius:8px;border:1px solid #e4ddd2;background:#fff;cursor:pointer;font-weight:600;font-family:inherit;font-size:14px}
+  .tab.active{background:#1c1c1c;color:#fff;border-color:#1c1c1c}
+  .panel{display:none;background:#fff;border:1px solid #e4ddd2;border-radius:12px;padding:20px}
+  .panel.active{display:block}
+  label{display:block;font-weight:600;font-size:13px;margin:10px 0 4px}
+  input,select{width:100%;max-width:420px;padding:9px 11px;border:1px solid #d8d0c3;border-radius:8px;font:inherit}
+  button.go{margin-top:12px;padding:10px 20px;border:0;border-radius:8px;background:#ff7000;color:#fff;font:inherit;font-weight:700;cursor:pointer}
+  button.go:disabled{opacity:.5;cursor:default}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:14px}
+  th,td{padding:8px 10px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+  th{background:#faf7f2;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b6156}
+  .badge{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:700;color:#fff}
+  .b-high{background:#c0392b}.b-mid{background:#b45309}.b-low{background:#047857}
+  .note{margin-top:10px;font-size:13px;padding:10px 12px;border-radius:8px}
+  .ok-note{background:#e8f5ee;color:#0a5b36}
+  .warn{background:#fdf3e4;color:#7a4d05}
+  .err{background:#fdeaea;color:#86231f}
+  pre{background:#faf7f2;border:1px solid #eee;border-radius:8px;padding:12px;font-size:12.5px;overflow:auto;white-space:pre-wrap}
+  a{color:#c05a00}
+  .row{display:flex;gap:14px;flex-wrap:wrap}.row>div{flex:1;min-width:240px}
+  h2{font-size:18px;margin-bottom:6px}
+  p.hint{font-size:13px;color:#6b6156;margin-bottom:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>LaunchLocal — marketing platform</h1>
+  <nav><a href="/">Dashboard</a><a href="/chat">Chat (Mistral)</a></nav>
+</header>
+<div class="wrap">
+  <div class="tabs">
+    <button class="tab active" data-tab="leads">1 · Find leads</button>
+    <button class="tab" data-tab="audit">2 · Audit &amp; score</button>
+    <button class="tab" data-tab="website">3 · Build website</button>
+    <button class="tab" data-tab="seo">4 · SEO pack</button>
+    <button class="tab" data-tab="outreach">5 · Email / SMS</button>
+    <button class="tab" data-tab="client">6 · Client tools</button>
+  </div>
 
-    <script type="module" src="/main.js"></script>
-  </body>
+  <section class="panel active" id="panel-leads">
+    <h2>Find local businesses that need marketing help</h2>
+    <p class="hint">Uses Google Places when GOOGLE_PLACES_API_KEY is set; otherwise returns built-in demo leads so you can test the flow.</p>
+    <div class="row">
+      <div><label for="q-cat">Industry</label><input id="q-cat" value="plumber" placeholder="plumber, dentist, restaurant…"></div>
+      <div><label for="q-city">City</label><input id="q-city" value="Bakersfield" placeholder="City, state"></div>
+      <div><label for="q-limit">Max results</label><input id="q-limit" type="number" value="10" min="1" max="20"></div>
+    </div>
+    <button class="go" id="btn-search">Search leads</button>
+    <div id="leads-out"></div>
+  </section>
+
+  <section class="panel" id="panel-audit">
+    <h2>Automated website audit</h2>
+    <p class="hint">Checks HTTPS, speed, titles, meta, mobile, robots.txt, sitemap, schema, alt-text and content depth, then re-scores the lead.</p>
+    <label for="a-lead">Pick a stored lead (optional)</label>
+    <select id="a-lead"><option value="">— manual URL instead —</option></select>
+    <label for="a-url">Or audit any URL</label>
+    <input id="a-url" placeholder="acmeplumbing.com">
+    <button class="go" id="btn-audit">Run audit</button>
+    <div id="audit-out"></div>
+  </section>
+
+  <section class="panel" id="panel-website">
+    <h2>Instant website builder</h2>
+    <p class="hint">Generates a fast, SEO-tagged one-page site with LocalBusiness schema, copy from Mistral (or solid templates), saved under /sites/.</p>
+    <label for="w-lead">Pick a lead</label>
+    <select id="w-lead"></select>
+    <label for="w-template">Template (leave on Auto to match business type)</label>
+    <select id="w-template"><option value="">Auto — match business type</option></select>
+    <button class="go" id="btn-site">Build website</button>
+    <div id="site-out"></div>
+  </section>
+
+  <section class="panel" id="panel-seo">
+    <h2>SEO optimizer</h2>
+    <p class="hint">Meta title/description, local keywords, weekly Google Business post ideas, and prioritized fixes. Runs an audit first if needed.</p>
+    <label for="s-lead">Pick a lead</label>
+    <select id="s-lead"></select>
+    <button class="go" id="btn-seo">Generate SEO pack</button>
+    <div id="seo-out"></div>
+  </section>
+
+  <section class="panel" id="panel-outreach">
+    <h2>Auto email / SMS responder</h2>
+    <p class="hint">Drafts personalized first-touch email + SMS using the audit findings. With SMTP/Twilio configured it sends; otherwise it returns previews. Inbound auto-replies can be added via webhooks later.</p>
+    <label for="o-lead">Pick a lead</label>
+    <select id="o-lead"></select>
+    <label for="o-email">Send email to (address)</label>
+    <input id="o-email" placeholder="owner@business.com (leave empty for preview only)">
+    <label for="o-sms">Send SMS to (phone, E.164)</label>
+    <input id="o-sms" placeholder="+16615550134 (leave empty for preview only)">
+    <button class="go" id="btn-outreach">Draft outreach</button>
+    <div id="outreach-out"></div>
+  </section>
+
+  <section class="panel" id="panel-client">
+    <h2>Client tools</h2>
+    <p class="hint">Everything after the sale: monthly progress reports (keeps your $299/mo renewals), Google Business Profile packs, review-request texts, and Google/Facebook ads waste audits.</p>
+    <label for="c-lead">Pick a client lead</label>
+    <select id="c-lead"></select>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button class="go" id="btn-report">Email monthly report</button>
+      <button class="go" id="btn-gbp">GBP optimization pack</button>
+      <button class="go" id="btn-ads">Audit their ads for waste</button>
+    </div>
+    <div style="margin-top:16px;border-top:1px solid #eee4d8;padding-top:10px">
+      <label for="rv-name">Review request — customer name</label>
+      <input id="rv-name" placeholder="Happy customer's first name">
+      <label for="rv-phone">Review request — customer phone</label>
+      <input id="rv-phone" placeholder="+16615550134">
+      <button class="go" id="btn-review">Text the review link</button>
+    </div>
+    <div id="client-out"></div>
+  </section>
+</div>
+<script type="module" src="/app.js"></script>
+</body>
 </html>

@@ -1,22 +1,25 @@
 {
-  "name": "mistral-chat-app",
-  "version": "0.1.0",
+  "name": "launchlocal",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Minimal web chat app powered by the Mistral API",
+  "description": "LaaS - Leadgen as a Service: find local businesses that need marketing help, audit and score them, build websites, SEO packs, and auto-responder outreach",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts"
+    "start": "tsx src/server.ts",
+    "smoke": "node scripts/smoke.mjs"
   },
   "dependencies": {
     "@mistralai/mistralai": "^1.9.12",
     "dotenv": "^17.2.1",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "nodemailer": "^7.0.9"
   },
   "devDependencies": {
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
     "@types/express": "^5.0.3",
-    "@types/node": "^22.18.0"
+    "@types/node": "^22.18.0",
+    "@types/nodemailer": "^7.0.4"
   }
 }
