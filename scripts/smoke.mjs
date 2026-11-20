@@ -3,9 +3,26 @@ import fs from "node:fs";
 import { createHmac } from "node:crypto";
 import { Readable } from "node:stream";
 import { EventEmitter } from "node:events";
-import { app } from "../src/server.ts";
-import { resetStore } from "../src/lib/store.ts";
-import { tickSequences } from "../src/lib/sequences.ts";
+
+const smokeEnv = {
+  MISTRAL_API_KEY: "",
+  GOOGLE_PLACES_API_KEY: "",
+  TWILIO_ACCOUNT_SID: "",
+  TWILIO_AUTH_TOKEN: "",
+  TWILIO_FROM: "",
+  SMTP_HOST: "",
+  SMTP_PASS: "",
+  STRIPE_SECRET_KEY: "",
+  STRIPE_PAYMENT_LINK: "",
+};
+for (const [k, v] of Object.entries(smokeEnv)) process.env[k] = v;
+
+const [{ app }, storeLib, { tickSequences }] = await Promise.all([
+  import("../src/server.ts"),
+  import("../src/lib/store.ts"),
+  import("../src/lib/sequences.ts"),
+]);
+const { resetStore } = storeLib;
 
 resetStore();
 const WEBHOOK_SECRET = "whsec_smoke_test";
@@ -372,8 +389,8 @@ assert.equal(onboardAfter.steps[2].status, "pending", "onboarding day 9 step sti
 console.log("client tools:", `gbp=${gbpPack.source} review=journaled intake=journaled adsFindings=${adsBody.findings.length} waste=$${adsBody.estimatedMonthlyWaste} onboardingStep1=${onboardAfter.steps[0].status}`);
 
 assert.ok(fs.existsSync("data/launchlocal.db"), "SQLite database file created");
-const storeLib = await import("../src/lib/store.ts");
-storeLib.loadStore();
+const { loadStore: reloadStore } = storeLib;
+reloadStore();
 const reloaded = storeLib.listLeads().find((l) => l.id === goodLead.id);
 assert.ok(reloaded && reloaded.status === "won", "SQLite roundtrip preserves leads + status");
 assert.ok(Object.keys(storeLib.getConversation("smoke-agent").messages ?? []).length >= 0, "conversations reload from SQLite");

@@ -304,11 +304,12 @@ export async function runAgent(turn: AgentTurn): Promise<AgentResult> {
           parsedArgs = {};
         }
         const toolResult = await executeTool(fnName, parsedArgs, state);
-        messages.push({ role: "tool", name: fnName, content: toolResult });
+        messages.push({ role: "tool", name: fnName, content: toolResult, ...(call.id ? { toolCallId: call.id } : {}) });
       }
     }
     return { reply: "Sorry — I lost track there. Could you say that again?", engine: "mistral-tools", toolsUsed: state.toolsUsed, leadId: conv.leadId };
   } catch (err) {
+    console.error("Agent tool loop failed:", err instanceof Error ? err.message : err);
     const fallback = await rulesFallback(turn, state);
     return { reply: fallback, engine: "rules", toolsUsed: state.toolsUsed, leadId: conv.leadId };
   }
